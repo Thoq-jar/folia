@@ -272,6 +272,7 @@ impl Runtime {
                 self.set_flags(result);
             }
             OpCode::JMP => {
+                self.output_buffer.flush().unwrap();
                 self.pc = (instruction.immediate as usize) * 2;
             }
             OpCode::JEQ => {
@@ -346,6 +347,7 @@ impl Runtime {
                 }
             }
             OpCode::CALL => {
+                self.output_buffer.flush().unwrap();
                 self.call_stack.push(self.pc);
                 self.stack.push(self.pc as i32);
                 self.pc = (instruction.immediate as usize) * 2;
@@ -436,6 +438,7 @@ impl Runtime {
                 self.set_flags(result);
             }
             OpCode::PRINT => {
+                self.output_buffer.flush().unwrap();
                 let value = self.registers[instruction.rd as usize];
                 write!(self.output_buffer, "{}", value).unwrap();
             }

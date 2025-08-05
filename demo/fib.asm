@@ -1,11 +1,11 @@
-.text
 .start main
 
-main:
+.text
+_start:
     mov r1, #0              ; first fibonacci number (F0)
     mov r2, #1              ; second fibonacci number (F1)
     mov r3, #0              ; counter
-    mov r4, #42             ; limit (calculate F0 to F42)
+    mov r4, #46             ; limit (calculate F0 to F42)
 
     print r1
     mov r5, #10             ; newline
@@ -23,8 +23,7 @@ loop:
                             ; calculate next fibonacci number
     add r6, r1, r2          ; r6 = r1 + r2
 
-                            ; print the result
-    print r6
+    print r6                ; print the result
     printc r5               ; newline
 
     mov r1, r2              ; r1 = previous r2
