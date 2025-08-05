@@ -464,7 +464,6 @@ impl Runtime {
             OpCode::INPUT => {
                 self.output_buffer.flush().unwrap();
                 let mut input = String::new();
-                print!("Enter a 32-bit integer (-2147483648 to 2147483647): ");
                 io::stdout().flush().unwrap();
 
                 if io::stdin().read_line(&mut input).is_ok() {
