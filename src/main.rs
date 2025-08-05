@@ -10,17 +10,33 @@ use std::path::Path;
 use crate::assembler::Assembler;
 use crate::runtime::Runtime;
 
+fn read_and_concatenate_files(files: &[String]) -> Result<String, String> {
+    let mut combined_source = String::new();
+    
+    for (i, file) in files.iter().enumerate() {
+        let content = fs::read_to_string(file)
+            .map_err(|e| format!("Error reading file {}: {}", file, e))?;
+        
+        if i > 0 {
+            combined_source.push('\n');
+        }
+        combined_source.push_str(&content);
+    }
+    
+    Ok(combined_source)
+}
+
 fn main() {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        println!("Usage: {} <command> [file]", args[0]);
+        println!("Usage: {} <command> [file1] [file2] ...", args[0]);
         println!("Commands:");
-        println!("  compile <source.asm> - Compile assembly to .fam bytecode");
-        println!("  run <program.fam>    - Run bytecode program");
-        println!("  run <source.asm>     - Compile and run assembly program (no .fam file saved)");
-        println!("  debug <program.fam>  - Run with debug output");
-        println!("  debug <source.asm>   - Compile and debug assembly program (no .fam file saved)");
+        println!("  compile <source.asm> [source2.asm] ... - Compile assembly files to .fam bytecode");
+        println!("  run <program.fam>                      - Run bytecode program");
+        println!("  run <source.asm> [source2.asm] ...    - Compile and run assembly programs (no .fam file saved)");
+        println!("  debug <program.fam>                    - Run with debug output");
+        println!("  debug <source.asm> [source2.asm] ...  - Compile and debug assembly programs (no .fam file saved)");
         process::exit(1);
     }
 
@@ -29,15 +45,15 @@ fn main() {
     match command.as_str() {
         "compile" => {
             if args.len() < 3 {
-                println!("Usage: {} compile <source.asm>", args[0]);
+                println!("Usage: {} compile <source.asm> [source2.asm] ...", args[0]);
                 process::exit(1);
             }
 
-            let source_file = &args[2];
-            let source = match fs::read_to_string(source_file) {
+            let source_files: Vec<String> = args[2..].to_vec();
+            let source = match read_and_concatenate_files(&source_files) {
                 Ok(content) => content,
                 Err(e) => {
-                    println!("Error reading file {}: {}", source_file, e);
+                    println!("{}", e);
                     process::exit(1);
                 }
             };
@@ -45,7 +61,11 @@ fn main() {
             let mut assembler = Assembler::new();
             match assembler.assemble(&source) {
                 Ok(bytecode) => {
-                    let output_file = source_file.replace(".asm", ".fam").replace(".s", ".fam");
+                    let output_file = if source_files.len() == 1 {
+                        source_files[0].replace(".asm", ".fam").replace(".s", ".fam")
+                    } else {
+                        "program.fam".to_string()
+                    };
                     match fs::write(&output_file, &bytecode) {
                         Ok(_) => println!("Compiled to {}", output_file),
                         Err(e) => {
@@ -62,19 +82,29 @@ fn main() {
         }
         "run" | "debug" => {
             if args.len() < 3 {
-                println!("Usage: {} {} <program.fam|source.asm>", args[0], command);
+                println!("Usage: {} {} <program.fam|source.asm> [source2.asm] ...", args[0], command);
                 process::exit(1);
             }
 
-            let input_file = &args[2];
-            let path = Path::new(input_file);
+            let input_files: Vec<String> = args[2..].to_vec();
+            let first_file = &input_files[0];
+            let path = Path::new(first_file);
             let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
             let bytecode = if extension == "s" || extension == "asm" {
-                let source = match fs::read_to_string(input_file) {
+                for file in &input_files {
+                    let file_path = Path::new(file);
+                    let file_ext = file_path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    if file_ext != "s" && file_ext != "asm" {
+                        println!("Error: All files must be assembly files when using multiple files");
+                        process::exit(1);
+                    }
+                }
+
+                let source = match read_and_concatenate_files(&input_files) {
                     Ok(content) => content,
                     Err(e) => {
-                        println!("Error reading assembly file {}: {}", input_file, e);
+                        println!("{}", e);
                         process::exit(1);
                     }
                 };
@@ -88,10 +118,14 @@ fn main() {
                     }
                 }
             } else {
-                match fs::read(input_file) {
+                if input_files.len() > 1 {
+                    println!("Error: Multiple files not supported for bytecode (.fam) files");
+                    process::exit(1);
+                }
+                match fs::read(first_file) {
                     Ok(data) => data,
                     Err(e) => {
-                        println!("Error reading bytecode file {}: {}", input_file, e);
+                        println!("Error reading bytecode file {}: {}", first_file, e);
                         process::exit(1);
                     }
                 }
