@@ -113,13 +113,13 @@ fn main() {
                 match assembler.assemble(&source) {
                     Ok(bytecode) => bytecode,
                     Err(e) => {
-                        println!("Assembly error: {}", e);
+                        println!("Assembler error: {}", e);
                         process::exit(1);
                     }
                 }
             } else {
                 if input_files.len() > 1 {
-                    println!("Error: Multiple files not supported for bytecode (.fam) files");
+                    println!("Error: Multiple files are not supported for bytecode (.fam) files");
                     process::exit(1);
                 }
                 match fs::read(first_file) {

@@ -471,26 +471,104 @@ impl Runtime {
 
                 if io::stdin().read_line(&mut input).is_ok() {
                     let trimmed = input.trim();
-                    match trimmed.parse::<i32>() {
-                        Ok(value) => {
-                            self.registers[instruction.rd as usize] = value;
-                        }
-                        Err(_) => {
-                            return match trimmed.parse::<i64>() {
-                                Ok(big_value) => {
-                                    Err(self.runtime_error(
-                                        format!("Input integer overflow: {} is outside the range of 32-bit signed integers ({} to {})",
-                                                big_value, i32::MIN, i32::MAX),
-                                        instruction,
-                                    ))
+
+                    let input_mode = if instruction.rs1 != 0 {
+                        self.registers[instruction.rs1 as usize]
+                    } else {
+                        return Err(self.runtime_error(
+                            "Input mode register required for INPUT instruction".to_string(),
+                            instruction,
+                        ));
+                    };
+
+                    match input_mode {
+                        0 => {
+                            match trimmed.parse::<i32>() {
+                                Ok(value) => {
+                                    self.registers[instruction.rd as usize] = value;
                                 }
                                 Err(_) => {
-                                    Err(self.runtime_error(
-                                        format!("Invalid integer input: '{}' is not a valid integer", trimmed),
-                                        instruction,
-                                    ))
+                                    return match trimmed.parse::<i64>() {
+                                        Ok(big_value) => {
+                                            Err(self.runtime_error(
+                                                format!("Input integer overflow: {} is outside the range of 32-bit signed integers ({} to {})",
+                                                        big_value, i32::MIN, i32::MAX),
+                                                instruction,
+                                            ))
+                                        }
+                                        Err(_) => {
+                                            Err(self.runtime_error(
+                                                format!("Invalid integer input: '{}' is not a valid integer", trimmed),
+                                                instruction,
+                                            ))
+                                        }
+                                    }
                                 }
                             }
+                        }
+                        1 => {
+                            if let Some(first_char) = trimmed.chars().next() {
+                                self.registers[instruction.rd as usize] = first_char as u8 as i32;
+                            } else {
+                                self.registers[instruction.rd as usize] = 0;
+                            }
+                        }
+                        2 => {
+                            let base_addr = if instruction.rs2 != 0 {
+                                self.registers[instruction.rs2 as usize] as usize
+                            } else {
+                                return Err(self.runtime_error(
+                                    "String input mode requires base address in rs2 register".to_string(),
+                                    instruction,
+                                ));
+                            };
+
+                            self.registers[instruction.rd as usize] = trimmed.len() as i32;
+
+                            for (i, byte) in trimmed.bytes().enumerate() {
+                                let addr = base_addr + i;
+                                if addr >= self.memory.len() * 4 {
+                                    return Err(self.runtime_error(
+                                        format!("String input exceeds memory bounds at address {}", addr),
+                                        instruction,
+                                    ));
+                                }
+
+                                let word_addr = addr / 4;
+                                let byte_offset = addr % 4;
+                                let current = self.memory[word_addr];
+                                let mask = !(0xFF << (byte_offset * 8));
+                                let new_val = (current & mask) | ((byte as i32) << (byte_offset * 8));
+                                self.memory[word_addr] = new_val;
+                            }
+
+                            let null_addr = base_addr + trimmed.len();
+                            if null_addr < self.memory.len() * 4 {
+                                let word_addr = null_addr / 4;
+                                let byte_offset = null_addr % 4;
+                                let current = self.memory[word_addr];
+                                let mask = !(0xFF << (byte_offset * 8));
+                                self.memory[word_addr] = current & mask;
+                            }
+                        }
+                        3 => {
+                            match trimmed.parse::<f32>() {
+                                Ok(float_val) => {
+                                    self.registers[instruction.rd as usize] = float_val.to_bits() as i32;
+                                }
+                                Err(_) => {
+                                    return Err(self.runtime_error(
+                                        format!("Invalid float input: '{}' is not a valid floating point number", trimmed),
+                                        instruction,
+                                    ));
+                                }
+                            }
+                        }
+                        _ => {
+                            return Err(self.runtime_error(
+                                format!("Invalid input mode: {} (valid modes: 0=integer, 1=character, 2=string, 3=float)", input_mode),
+                                instruction,
+                            ));
                         }
                     }
                 } else {
