@@ -55,10 +55,11 @@ pub struct Instruction {
     - Instructions stored as 8-byte chunks (opcode + immediate)
 
 **`LOAD` instruction**
-- Loads byte from memory address into register
+- Loads effective address from memory into register
 - Address can be from register or immediate value
-- Bounds checking prevents memory access violations
-- Format: `LOAD rd, [rs1]` or `LOAD rd, #immediate`
+- Used for computing memory addresses and pointers
+- Does not actually load data from memory, only calculates address
+- Format: `LEA rd, [rs1]` or `LEA rd, #immediate`
 
 **`STORE` instruction**
 - Stores register value to memory address

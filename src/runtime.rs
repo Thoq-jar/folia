@@ -295,26 +295,13 @@ impl Runtime {
                     self.pc = (instruction.immediate as usize) * 2;
                 }
             }
-            OpCode::LOAD => {
+            OpCode::LEA => {
                 let addr = if instruction.rs1 != 0 {
-                    self.registers[instruction.rs1 as usize] as usize
+                    self.registers[instruction.rs1 as usize] + instruction.immediate
                 } else {
-                    instruction.immediate as usize
+                    instruction.immediate
                 };
-
-                if addr >= self.memory.len() * 4 {
-                    return Err(self.runtime_error(
-                        format!("Memory access out of bounds: address {} (max: {})",
-                                addr, self.memory.len() * 4 - 1),
-                        instruction,
-                    ));
-                }
-
-                let word_addr = addr / 4;
-                let byte_offset = addr % 4;
-                let word = self.memory[word_addr];
-                let byte = (word >> (byte_offset * 8)) & 0xFF;
-                self.registers[instruction.rd as usize] = byte;
+                self.registers[instruction.rd as usize] = addr;
             }
             OpCode::STORE => {
                 let addr = if instruction.rs1 != 0 {
@@ -595,16 +582,217 @@ impl Runtime {
         Ok(())
     }
 
-    pub(crate) fn debug_state(&self) {
-        println!("PC: {} (instruction #{})", self.pc / 2, self.instruction_count);
-        println!("Registers:");
-        for (i, &val) in self.registers.iter().enumerate().take(8) {
-            println!("  r{}: {}", i, val);
+    pub(crate) fn run_with_trace(&mut self) -> Result<(), RuntimeError> {
+        while self.running {
+            if let Some(instruction) = self.fetch() {
+                self.debug_instruction();
+                if let Err(error) = self.execute(instruction) {
+                    return Err(error);
+                }
+            } else {
+                break;
+            }
         }
-        println!(
-            "Flags: Z={} N={} C={} V={}",
-            self.flags.zero, self.flags.negative, self.flags.carry, self.flags.overflow
-        );
-        println!("Stack size: {}, Call stack depth: {}", self.stack.len(), self.call_stack.len());
+        Ok(())
+    }
+
+    pub(crate) fn debug_state(&self) {
+        println!("VM Debug State");
+        println!("PC: {} (instruction #{})", self.pc / 2, self.instruction_count);
+
+        println!("Registers:");
+        for chunk in self.registers.chunks(4).enumerate() {
+            let start_idx = chunk.0 * 4;
+            print!("  ");
+            for (i, &val) in chunk.1.iter().enumerate() {
+                let reg_idx = start_idx + i;
+                print!("r{:2}:{:4} ", reg_idx, val);
+            }
+            println!();
+        }
+
+        println!("Flags: Z={} N={} C={} V={}",
+                 self.flags.zero, self.flags.negative, self.flags.carry, self.flags.overflow);
+        println!("Stack: {} items", self.stack.len());
+        println!("Call stack: {} deep", self.call_stack.len());
+        println!();
+    }
+
+    pub(crate) fn debug_instruction(&self) {
+        if let Some(instruction) = self.get_instruction_at_pc(self.pc - 2) {
+            println!("🔍 Executing: {:?} rd={}, rs1={}, rs2={}, imm={}",
+                     instruction.opcode, instruction.rd, instruction.rs1,
+                     instruction.rs2, instruction.immediate);
+        }
+    }
+
+    pub(crate) fn debug_memory(&self, start_addr: usize, count: usize) {
+        for i in 0..count {
+            let addr = start_addr + i;
+            if addr < self.memory.len() {
+                let value = self.memory[addr];
+                println!("  [{:3}]: {:10} (0x{:08x})", addr, value, value as u32);
+            }
+        }
+    }
+
+    pub(crate) fn debug_stack(&self) {
+        println!("Stack contents ({} items):", self.stack.len());
+        if self.stack.is_empty() {
+            println!("  (empty)");
+        } else {
+            for (i, &value) in self.stack.iter().rev().enumerate() {
+                println!("  [{}]: {} (0x{:08x})",
+                         self.stack.len() - 1 - i, value, value as u32);
+            }
+        }
+    }
+
+    pub(crate) fn debug_call_stack(&self) {
+        println!("Call stack ({} deep):", self.call_stack.len());
+        if self.call_stack.is_empty() {
+            println!("  (empty)");
+        } else {
+            for (i, &pc) in self.call_stack.iter().rev().enumerate() {
+                if let Some(instruction) = self.get_instruction_at_pc(pc) {
+                    println!("  [{}]: PC {} -> {:?}", i, pc / 2, instruction.opcode);
+                } else {
+                    println!("  [{}]: PC {} -> (invalid)", i, pc / 2);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn debug_data_section(&self) {
+        println!("Data section (strings):");
+        let mut addr = 512;
+        let mut string_count = 0;
+
+        while addr < self.memory.len() * 4 && string_count < 10 {
+            let start_addr = addr;
+            let mut string_bytes = Vec::new();
+            let mut found_string = false;
+
+            while addr < self.memory.len() * 4 {
+                let word_addr = addr / 4;
+                let byte_offset = addr % 4;
+                let word = self.memory[word_addr];
+                let byte = ((word >> (byte_offset * 8)) & 0xFF) as u8;
+
+                if byte == 0 {
+                    if found_string {
+                        break;
+                    } else {
+                        addr += 1;
+                        continue;
+                    }
+                }
+
+                if byte.is_ascii() && (byte.is_ascii_graphic() || byte == b' ' || byte == b'\n' || byte == b'\t') {
+                    string_bytes.push(byte);
+                    found_string = true;
+                } else if found_string {
+                    break;
+                } else {
+                    addr += 1;
+                    continue;
+                }
+
+                addr += 1;
+
+                if string_bytes.len() > 100 {
+                    break;
+                }
+            }
+
+            if found_string && string_bytes.len() > 1 {
+                let string = String::from_utf8_lossy(&string_bytes);
+                println!("  [{}]: \"{}\"", start_addr, string.escape_default());
+                string_count += 1;
+            }
+
+            addr += 1;
+        }
+
+        if string_count == 0 {
+            println!("  (no readable strings found)");
+        }
+    }
+
+    pub(crate) fn debug_performance(&self) {
+        println!("⚡ Performance stats:");
+        println!("  Instructions executed: {}", self.instruction_count);
+        println!("  Memory usage: {}/{} words",
+                 self.memory.iter().filter(|&&x| x != 0).count(),
+                 self.memory.len());
+        println!("  Stack peak: {} items", self.stack.len());
+        println!("  Call depth peak: {}", self.call_stack.len());
+    }
+
+    pub(crate) fn debug_step(&mut self) -> Result<bool, RuntimeError> {
+        use std::io::{stdin, Write};
+
+        loop {
+            println!("\nDebugger (PC: {}, instruction #{})", self.pc / 2, self.instruction_count);
+
+            if let Some(instruction) = self.get_instruction_at_pc(self.pc) {
+                println!("Next: {:?} rd={}, rs1={}, rs2={}, imm={}",
+                         instruction.opcode, instruction.rd, instruction.rs1,
+                         instruction.rs2, instruction.immediate);
+            }
+
+            print!("Commands: (s)tep, (c)ontinue, (r)egisters, (m)emory, (st)ack, (d)ata, (p)erf, (q)uit: ");
+            io::stdout().flush().unwrap();
+
+            let mut input = String::new();
+            if stdin().read_line(&mut input).is_ok() {
+                match input.trim().to_lowercase().as_str() {
+                    "s" | "step" => {
+                        return if let Some(instruction) = self.fetch() {
+                            if let Err(error) = self.execute(instruction.clone()) {
+                                return Err(error);
+                            }
+                            self.debug_instruction();
+                            Ok(self.running)
+                        } else {
+                            println!("Program ended");
+                            Ok(false)
+                        }
+                    }
+                    "c" | "continue" => {
+                        return Ok(true);
+                    }
+                    "r" | "registers" => {
+                        self.debug_state();
+                    }
+                    "m" | "memory" => {
+                        print!("Enter start address: ");
+                        io::stdout().flush().unwrap();
+                        let mut addr_input = String::new();
+                        if stdin().read_line(&mut addr_input).is_ok() {
+                            if let Ok(addr) = addr_input.trim().parse::<usize>() {
+                                self.debug_memory(addr, 8);
+                            }
+                        }
+                    }
+                    "st" | "stack" => {
+                        self.debug_stack();
+                        self.debug_call_stack();
+                    }
+                    "d" | "data" => {
+                        self.debug_data_section();
+                    }
+                    "p" | "perf" => {
+                        self.debug_performance();
+                    }
+                    "q" | "quit" => {
+                        return Ok(false);
+                    }
+                    _ => {
+                        println!("Unknown command. Available: step, continue, registers, memory, stack, data, perf, quit");
+                    }
+                }
+            }
+        }
     }
 }

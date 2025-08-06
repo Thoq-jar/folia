@@ -7,12 +7,12 @@ _start:
     mov r3, #0              ; counter
     mov r4, #46             ; limit (calculate F0 to F42)
 
-    print r1
+    prt r1
     mov r5, #10             ; newline
-    printc r5
+    prc r5
 
-    print r2
-    printc r5
+    prt r2
+    prc r5
 
     mov r3, #2              ; start counter at 2 (already printed F0 and F1)
 
@@ -23,8 +23,8 @@ loop:
                             ; calculate next fibonacci number
     add r6, r1, r2          ; r6 = r1 + r2
 
-    print r6                ; print the result
-    printc r5               ; newline
+    prt r6                  ; print the result
+    prc r5                  ; newline
 
     mov r1, r2              ; r1 = previous r2
     mov r2, r6              ; r2 = new fibonacci number
@@ -33,4 +33,4 @@ loop:
     jmp loop                ; back to loop
 
 end:
-    halt                    ; halt program
+    hlt                     ; halt program
